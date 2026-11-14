@@ -96,6 +96,6 @@ npm test                     # React (Jest + React Testing Library), from repo r
 | Name | Student ID |
 |---|---|
 | Mohammed Al-Jarbou | 221110338 |
-| Eyad Al-Shuhail | 222110093 |
-| Hamad Al-Waheebi | 222110607 |
-| Ahmad Al-Talhi | 222111457 |
+| Eyad Al-Shuhail | 222110607 |
+| Hamad Al-Waheebi | 222111457 |
+| Ahmad Al-Talhi | 222111463 |
