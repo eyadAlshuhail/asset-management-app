@@ -1,70 +1,101 @@
-# Getting Started with Create React App
+# IT Asset Management System — SE411 Project
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Full-stack app for tracking IT hardware (laptops, desktops, servers, mobiles).
 
-## Available Scripts
+- **Part 1:** React frontend (repo root)
+- **Part 2:** Java Spring Boot REST server (`backend/`) + integration with the frontend
 
-In the project directory, you can run:
+## Architecture
 
-### `npm start`
+```
+┌──────────────────────┐   HTTP / JSON (fetch)   ┌──────────────────────────────────────────────┐
+│  React SPA :3000     │ ──────────────────────▶ │  Spring Boot server :8080                    │
+│                      │                         │                                              │
+│  App.js (state)      │                         │  AssetController   (REST, @RestController)   │
+│  AssetList / Form    │ ◀────────────────────── │        │                                     │
+│  Pagination / About  │     JSON responses      │  AssetService      (business logic)          │
+│  api/assetApi.js     │                         │        │                                     │
+└──────────────────────┘                         │  AssetRepository   (Spring Data JPA)         │
+                                                 │        │                                     │
+                                                 │  H2 in-memory database (table: assets)       │
+                                                 │                                              │
+                                                 │  + GlobalExceptionHandler (404/400/409 JSON) │
+                                                 │  + CorsConfig (allows localhost:3000)        │
+                                                 │  + DataSeeder (12 sample assets at startup)  │
+                                                 └──────────────────────────────────────────────┘
+```
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## REST API
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+Base URL: `http://localhost:8080/api/assets`
 
-### `npm test`
+| Method | Route | Description | Request body | Success | Errors |
+|---|---|---|---|---|---|
+| POST | `/api/assets` | Add an asset | Asset JSON (no id) | 201 Created + asset | 400 invalid, 409 duplicate serial |
+| GET | `/api/assets/{id}` | Search an asset by id | – | 200 OK + asset | 404 not found |
+| GET | `/api/assets?page=0&size=5&sort=id,asc` | All assets, paginated | – | 200 OK + page object | – |
+| PUT | `/api/assets/{id}` | Update an asset | Asset JSON | 200 OK + updated asset | 400 invalid, 404 not found |
+| DELETE | `/api/assets/{id}` | Delete an asset | – | 204 No Content | 404 not found |
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Asset JSON:
+```json
+{ "id": 1, "name": "Dell XPS 15", "category": "Laptop", "serialNumber": "SN-33211",
+  "assignedTo": "Eyad Al-Shuhail", "status": "In Use", "purchaseDate": "2024-03-10" }
+```
 
-### `npm run build`
+Page JSON:
+```json
+{ "content": [ ... ], "page": 0, "size": 5, "totalElements": 12, "totalPages": 3, "first": true, "last": false }
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Running it
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Requirements: Java 17+ (17 or 21 recommended), Maven 3.9+ (or IntelliJ's bundled Maven), Node 18+.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+# 1) backend
+cd backend
+mvn spring-boot:run          # http://localhost:8080/api/assets
 
-### `npm run eject`
+# 2) frontend (new terminal, repo root)
+npm install
+npm start                    # http://localhost:3000
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+H2 console (to show the database in the demo): http://localhost:8080/h2-console, JDBC URL `jdbc:h2:mem:assetdb`, user `sa`, empty password.
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Change the API URL for the frontend with `REACT_APP_API_URL=http://host:port/api/assets npm start`.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## Tests
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+cd backend && mvn test       # JUnit 5 + Mockito; coverage report: backend/target/site/jacoco/index.html
+npm test                     # React (Jest + React Testing Library), from repo root
+```
 
-## Learn More
+| Test class | What it covers |
+|---|---|
+| `AssetServiceTest` | Service logic with a **Mockito mock** repository (`@Mock` / `@InjectMocks`): create, get by id (found / 404), paginated list, update (found / 404), delete (found / 404) |
+| `AssetControllerTest` | Every REST route through **MockMvc** with the service mocked (`@WebMvcTest` + `@MockitoBean`): status codes, JSON body, pagination params and defaults, validation 400, 404, 409, CORS |
+| `DataSeederTest` | Seeding runs only when the DB is empty |
+| `AssetManagementApplicationTests` | Whole Spring context starts |
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## Code walkthrough (for the Q&A)
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+- **Layers:** Controller → Service → Repository. Each layer only talks to the one below it, and dependencies are passed in through constructors. That's why the tests can swap in mocks.
+- **`Asset`** (`@Entity`): JPA maps it to the `assets` table. `@Id @GeneratedValue(IDENTITY)` means the DB generates ids. `@NotBlank`/`@NotNull` are validation rules that `@Valid` checks in the controller.
+- **`AssetRepository extends JpaRepository<Asset, Long>`:** Spring generates the implementation at runtime. `findAll(Pageable)` does the `LIMIT/OFFSET` paging SQL.
+- **Pagination:** the controller takes a `Pageable` built from `?page=&size=&sort=` (default page 0, size 5, sorted by id) and wraps the result in the `PageResponse` record, which has a stable JSON shape.
+- **Errors:** the service throws `AssetNotFoundException`, and `@RestControllerAdvice GlobalExceptionHandler` turns it into a 404 JSON response. Validation errors become 400 and duplicate serial numbers become 409.
+- **CORS:** the browser blocks calls from :3000 to :8080 unless the server allows that origin, so `CorsConfig` allows it.
+- **Frontend integration:** `src/api/assetApi.js` wraps `fetch` for each route. `App.js` keeps `page`/`size` in state, calls `getAssets(page, size)` in a `useEffect`, and re-fetches after each add, update or delete.
+- **Mockito terms:** `when(...).thenReturn(...)` stubs a call, `verify(...)` checks that a call happened, `never()` checks that it didn't, and `ArgumentCaptor` grabs the argument that was passed so the test can inspect it.
 
-### Code Splitting
+## Team
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+| Name | Student ID |
+|---|---|
+| Mohammed Al-Jarbou | 221110338 |
+| Eyad Al-Shuhail | 222110093 |
+| Hamad Al-Waheebi | 222110607 |
+| Ahmad Al-Talhi | 222111457 |
